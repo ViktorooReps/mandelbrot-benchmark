@@ -1,6 +1,12 @@
 #include "stdio.h"
 #include <stdlib.h>
 #include <stdint.h>
+#include <time.h>
+
+struct OpStats {
+    uint64_t n_op;
+    uint64_t n_ns;
+};
 
 void save_matrix(uint32_t *matrix, int32_t n_rows, int32_t n_cols, const char *filename) {
     FILE *file = fopen(filename, "wb");
@@ -18,77 +24,170 @@ void save_matrix(uint32_t *matrix, int32_t n_rows, int32_t n_cols, const char *f
     fclose(file);
 }
 
-void naive_mandelbrot(uint32_t *n_iterations,
-                      int lower_rational,
-                      int upper_rational,
-                      int lower_irrational,
-                      int upper_irrational) {
+struct OpStats naive_mandelbrot(uint32_t *n_iterations,
+                                double lower_real,
+                                double upper_real,
+                                double lower_imaginary,
+                                double upper_imaginary,
+                                int height,
+                                int width,
+                                int max_iterations) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
+    // mandelbrot calculation
+
+    double re_factor = (upper_real - lower_real) / (width - 1);
+    double im_factor = (upper_imaginary - lower_imaginary) / (height - 1);
+
+    for (int y = 0; y < height; ++y) {
+        double c_im = upper_imaginary - y * im_factor;
+
+        for (int x = 0; x < width; ++x) {
+            double c_re = lower_real + x * re_factor;
+
+            // z_0 = c
+            double z_re = c_re, z_im = c_im;
+
+            int n;
+
+            for (n = 0; n < max_iterations; ++n) {
+                // compute the magnitude of z_i
+                double z_re2 = z_re * z_re, z_im2 = z_im * z_im;
+
+                // we consider number to reach the bound once |z_i| > 2
+                if (z_re2 + z_im2 > 4) {
+                    break;
+                }
+
+                // z_{i + 1} = z_i ** 2 + c = (re(z_i) ** 2 - im(z_i) ** 2, 2 * re(z_i) * im(z_i))
+                z_im = 2 * z_re * z_im + c_im;
+                z_re = z_re2 - z_im2 + c_re;
+            }
+
+            n_iterations[y * width + x] = n;
+        }
+    }
+
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
+    return res;
 }
 
-void parallelized_mandelbrot(uint32_t *n_iterations,
-                             int lower_rational,
-                             int upper_rational,
-                             int lower_irrational,
-                             int upper_irrational) {
+struct OpStats optimized_mandelbrot(uint32_t *n_iterations,
+                                    double lower_real,
+                                    double upper_real,
+                                    double lower_imaginary,
+                                    double upper_imaginary,
+                                    int height,
+                                    int width,
+                                    int max_iterations) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
+    // mandelbrot calculation
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
+    return res;
 }
 
 // Arguments:
 // [0]: (char[]) name of the program
-// [1]: (int) lower boundary for rational part
-// [2]: (int) upper boundary for rational part
-// [3]: (int) lower boundary for irrational part
-// [4]: (int) upper boundary for irrational part
+// [1]: (double) lower boundary for real part
+// [2]: (double) upper boundary for real part
+// [3]: (double) lower boundary for imaginary part
+// [4]: (double) upper boundary for imaginary part
+// [5]: (int) height
+// [6]: (int) width
+// [7]: (int) maximum number of iterations
 int main(int argc, char *argv[]) {
-    if (argc != 5) {
-        printf("Usage: %s <lower_rational> <upper_rational> <lower_irrational> <upper_irrational>\n", argv[0]);
+    // Check if the correct number of arguments is provided
+    if (argc != 8) {
+        printf("Usage: %s <lower_rational> <upper_rational> <lower_irrational> <upper_irrational> <height> <width> <max_iterations>\n",
+               argv[0]);
         return 1;
     }
 
-    int lower_rational, upper_rational, lower_irrational, upper_irrational;
+    double lower_real, upper_real, lower_imaginary, upper_imaginary;
+    int height, width, max_iterations;
 
-    char *endptr; // pointer to the character that ends the conversion
-    lower_rational = (int) strtol(argv[1], &endptr, 10);
+    // Convert command-line arguments to appropriate types
+    char *endptr;
+
+    // Rational boundaries
+    lower_real = strtod(argv[1], &endptr);
     if (*endptr != '\0') {
         printf("Invalid lower rational boundary: %s\n", argv[1]);
         return 1;
     }
 
-    upper_rational = (int) strtol(argv[2], &endptr, 10);
+    upper_real = strtod(argv[2], &endptr);
     if (*endptr != '\0') {
         printf("Invalid upper rational boundary: %s\n", argv[2]);
         return 1;
     }
 
-    lower_irrational = (int) strtol(argv[3], &endptr, 10);
+    // Irrational boundaries
+    lower_imaginary = strtod(argv[3], &endptr);
     if (*endptr != '\0') {
         printf("Invalid lower irrational boundary: %s\n", argv[3]);
         return 1;
     }
 
-    upper_irrational = (int) strtol(argv[4], &endptr, 10);
+    upper_imaginary = strtod(argv[4], &endptr);
     if (*endptr != '\0') {
         printf("Invalid upper irrational boundary: %s\n", argv[4]);
         return 1;
     }
 
-    printf("Lower boundary for rational part: %d\n", lower_rational);
-    printf("Upper boundary for rational part: %d\n", upper_rational);
-    printf("Lower boundary for irrational part: %d\n", lower_irrational);
-    printf("Upper boundary for irrational part: %d\n", upper_irrational);
+    // Image dimensions
+    height = (int) strtol(argv[5], &endptr, 10);
+    if (*endptr != '\0') {
+        printf("Invalid height value: %s\n", argv[5]);
+        return 1;
+    }
 
-    // we save these values to the file, so we use int32_t to ensure their size
-    int32_t n_rows = upper_rational - lower_rational;
-    int32_t n_cols = upper_irrational - lower_irrational;
+    width = (int) strtol(argv[6], &endptr, 10);
+    if (*endptr != '\0') {
+        printf("Invalid width value: %s\n", argv[6]);
+        return 1;
+    }
+
+    // Maximum iterations
+    max_iterations = (int) strtol(argv[7], &endptr, 10);
+    if (*endptr != '\0') {
+        printf("Invalid maximum number of iterations: %s\n", argv[7]);
+        return 1;
+    }
+
+    // Print the parsed values
+    printf("Lower boundary for rational part: %f\n", lower_real);
+    printf("Upper boundary for rational part: %f\n", upper_real);
+    printf("Lower boundary for irrational part: %f\n", lower_imaginary);
+    printf("Upper boundary for irrational part: %f\n", upper_imaginary);
+    printf("Height: %d\n", height);
+    printf("Width: %d\n", width);
+    printf("Maximum number of iterations: %d\n", max_iterations);
 
     // allocate the iteration matrix on the stack
     // we will save this matrix to binary file, so we use uint32_t to ensure the size
-    uint32_t n_iterations[n_rows * n_cols];
+    uint32_t *n_iterations = (uint32_t *) malloc(height * width * sizeof(uint32_t));
+    if (!n_iterations) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1;
+    }
 
-    naive_mandelbrot(n_iterations, lower_rational, upper_rational, lower_irrational, upper_irrational);
+    struct OpStats result = naive_mandelbrot(n_iterations, lower_real, upper_real, lower_imaginary,
+                                             upper_imaginary, height, width, max_iterations);
 
-    save_matrix(n_iterations, n_rows, n_cols, "result.bin");
+    printf("Operations: %llu, Time: %llu ns, ns/op: %f", result.n_op, result.n_ns,
+           (double) result.n_ns / (double) result.n_op);
+
+    save_matrix(n_iterations, height, width, "result.bin");
 
     return 0;
 }

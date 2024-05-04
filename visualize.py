@@ -23,7 +23,7 @@ def main():
 
     matrix = read_matrix(args.file)
 
-    plt.imshow(matrix)
+    plt.imshow(matrix, aspect='equal', cmap='viridis')
     plt.colorbar()
     plt.title(args.title)
     plt.savefig(args.output)
