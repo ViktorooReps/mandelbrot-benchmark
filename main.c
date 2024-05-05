@@ -210,41 +210,10 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
         c_im = _mm256_sub_pd(c_im, c_inc);
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
+  clock_gettime(CLOCK_MONOTONIC, &end);
 
-    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
+    struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
     return res;
-}
-
-// version: 0=naive, 1=optimized
-void benchmark(int version) {
-    const int repeat = 50;
-    // const int sizes[] = {100, 400, 800, 1000, 1400, 1600, 2000, 4000};
-    // const int max_iterss[] = {20, 100, 500, 800, 1000};
-    const int sizes[] = {2000, 4000};
-    const int max_iterss[] = {20, 100, 400};
-    printf("version,size,max_iters,time_s\n");
-    for (int si = 0; si < sizeof(sizes) / sizeof(int); ++si) {
-        const int size = sizes[si];
-        int32_t *n_iterations =
-            (int32_t *)aligned_alloc(64, size * size * sizeof(uint32_t));
-        for (int mi = 0; mi < sizeof(max_iterss) / sizeof(int); ++mi) {
-            const int max_iters = max_iterss[mi];
-            clock_t start = clock();
-            for (int r = 0; r < repeat; ++r) {
-                if (version == 0) {
-                    naive_mandelbrot((uint32_t *)n_iterations, -2, 1, -2, 2, size, size,
-                            max_iters);
-                } else if (version == 1) {
-                    optimized_mandelbrot(n_iterations, -2, 1, -2, 2, size, size,
-                            max_iters);
-                }
-            }
-            clock_t end = clock();
-            const double avg_sec = (double)(end - start) / CLOCKS_PER_SEC / repeat;
-            printf("%d,%d,%d,%f\n", version, size, max_iters, avg_sec);
-        }
-    }
 }
 
 // Arguments:
@@ -258,15 +227,6 @@ void benchmark(int version) {
 // [7]: (int) width
 // [8]: (int) maximum number of iterations
 int main(int argc, char *argv[]) {
-    if (argc == 3 && !strcmp(argv[1], "bench")) {
-        int version = atoi(argv[2]);
-        if (version != 0 && version != 1) {
-            return 1;
-        }
-        benchmark(version);
-        return 0;
-    }
-
     // Check if the correct number of arguments is provided
     if (argc != 9) {
         printf("Usage: %s <version> <lower_rational> <upper_rational> <lower_irrational> <upper_irrational> <height> <width> <max_iterations>\n",
@@ -344,13 +304,15 @@ int main(int argc, char *argv[]) {
     printf("Width: %d\n", width);
     printf("Maximum number of iterations: %d\n", max_iterations);
 
-    // allocate the iteration matrix on the stack
-    // we will save this matrix to binary file, so we use uint32_t to ensure the size
-    uint32_t *n_iterations = (uint32_t *) malloc(height * width * sizeof(uint32_t));
-    if (!n_iterations) {
-        fprintf(stderr, "Memory allocation failed\n");
-        return 1;
-    }
+  // allocate the iteration matrix on the stack
+  // we will save this matrix to binary file, so we use uint32_t to ensure the
+  // size
+  int32_t *n_iterations =
+      (int32_t *) aligned_alloc(64, height * width * sizeof(uint32_t));
+  if (!n_iterations) {
+    fprintf(stderr, "Memory allocation failed\n");
+    return 1;
+  }
 
     struct OpStats result = impl(n_iterations, lower_real, upper_real, lower_imaginary,
                                  upper_imaginary, height, width, max_iterations);
