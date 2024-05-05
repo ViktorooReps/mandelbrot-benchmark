@@ -24,6 +24,38 @@ void save_matrix(uint32_t *matrix, int32_t n_rows, int32_t n_cols, const char *f
     fclose(file);
 }
 
+// Computes the number of algebraic operations that was needed to compute
+// mandelbrot set. Does not include helper operations like incrementing the
+// index variables.
+uint64_t compute_ops(uint32_t const *n_iterations, int height, int width) {
+    uint64_t ops = 0;
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            uint32_t iterations = n_iterations[y * width + x];
+
+            // magnitude calculation and check
+            ops += 3 * (iterations + 1);
+
+            // calculation of the next element in the sequence
+            ops += 5 * iterations;
+        }
+    }
+    return ops;
+}
+
+uint64_t get_ns_diff(struct timespec start, struct timespec end) {
+    int64_t sec_passed = end.tv_sec - start.tv_sec;
+    int64_t ns_passed = end.tv_nsec - start.tv_nsec;  // could be negative!
+
+    if (ns_passed < 0) {
+        sec_passed -= 1;
+        ns_passed += 1000000000; // 1 billion nanoseconds in a second
+    }
+
+    return (sec_passed * 1000000000LL) + ns_passed;
+}
+
 struct OpStats naive_mandelbrot(uint32_t *n_iterations,
                                 double lower_real,
                                 double upper_real,
@@ -72,7 +104,7 @@ struct OpStats naive_mandelbrot(uint32_t *n_iterations,
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
-    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
+    struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
     return res;
 }
 
@@ -91,7 +123,7 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations,
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
-    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
+    struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
     return res;
 }
 
@@ -184,8 +216,8 @@ int main(int argc, char *argv[]) {
     struct OpStats result = naive_mandelbrot(n_iterations, lower_real, upper_real, lower_imaginary,
                                              upper_imaginary, height, width, max_iterations);
 
-    printf("Operations: %llu, Time: %llu ns, ns/op: %f", result.n_op, result.n_ns,
-           (double) result.n_ns / (double) result.n_op);
+    printf("Operations: %llu, Time: %llu ns, ns/op: %Lf", result.n_op, result.n_ns,
+           (long double) result.n_ns / (long double) result.n_op);
 
     save_matrix(n_iterations, height, width, "result.bin");
 
