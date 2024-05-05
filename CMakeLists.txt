@@ -3,7 +3,8 @@ project(mandelbrot_benchmark C)
 
 set(CMAKE_C_STANDARD 11)
 
-set(CMAKE_C_FLAGS_RELEASE -O3 -DNDEBUG)
+set(CMAKE_C_FLAGS -march=native)
+set(CMAKE_C_FLAGS_RELEASE -O3 -DNDEBUG -march=native)
 
 # Add the main executable
 add_executable(mandelbrot_benchmark main.c)
