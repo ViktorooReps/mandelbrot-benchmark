@@ -26,6 +26,7 @@ def main():
     plt.imshow(matrix, aspect='equal', cmap='viridis')
     plt.colorbar()
     plt.title(args.title)
+    plt.tight_layout()
     plt.savefig(args.output)
     plt.show()
 

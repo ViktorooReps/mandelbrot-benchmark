@@ -1,2 +1,7 @@
 numpy
 matplotlib
+pandas
+seaborn
+tqdm
+psutil
+py-cpuinfo
