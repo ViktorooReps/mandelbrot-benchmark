@@ -48,6 +48,7 @@ if __name__ == '__main__':
         results.loc[len(results.index)] = [versions[version_id], n, ns, ns_op]
 
     results.to_csv(args.output_csv, index=False)
+    results = pd.read_csv(args.output_csv)
 
     cpu_info = cpuinfo.get_cpu_info()
     title = f"{cpu_info.get('brand_raw', 'Unknown brand')}, {cpu_info.get('hz_actual_friendly', 'Unknown frequency')}"
