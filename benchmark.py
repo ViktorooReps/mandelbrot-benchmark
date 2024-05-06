@@ -10,7 +10,7 @@ import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
 
-REGEX = re.compile(r'Operations: \d+, Time: (\d+) ns, ns/op: (\d+\.\d+)')
+REGEX = re.compile(r'Operations: (\d+), Time: (\d+) ns')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the Mandelbrot benchmark and collect results.')
@@ -44,11 +44,11 @@ if __name__ == '__main__':
             text=True
         )
 
-        ns, ns_op = re.findall(REGEX, result.stdout)[0]
-        results.loc[len(results.index)] = [versions[version_id], n, ns, ns_op]
+        n_op, ns = re.findall(REGEX, result.stdout)[0]
+        n_op, ns = int(n_op), int(ns)
+        results.loc[len(results.index)] = [versions[version_id], n, ns, ns / n_op]
 
     results.to_csv(args.output_csv, index=False)
-    results = pd.read_csv(args.output_csv)
 
     cpu_info = cpuinfo.get_cpu_info()
     title = f"{cpu_info.get('brand_raw', 'Unknown brand')}, {cpu_info.get('hz_actual_friendly', 'Unknown frequency')}"

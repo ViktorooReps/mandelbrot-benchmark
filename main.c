@@ -265,7 +265,7 @@ void benchmark(const char* filename) {
     }
 
     // Write the header to the file
-    fprintf(output_file, "version,size,max_iters,time_s\n");
+    fprintf(output_file, "version,size,max_iters,time_ns\n");
 
     // Iterate through each combination of version, size, and max_iters
     for (int v = 0; v < sizeof(versions) / sizeof(int); ++v) {
@@ -298,7 +298,7 @@ void benchmark(const char* filename) {
                     unsigned long long time_ns = get_ns_diff(start, end);
 
                     // Write results to the file
-                    fprintf(output_file, "%d,%d,%d,%llu\n", v, size, max_iters, time_ns);
+                    fprintf(output_file, "%s,%d,%d,%llu\n", (v == 0) ? "naive" : "optimized", size, max_iters, time_ns);
                 }
             }
 
@@ -421,8 +421,7 @@ int main(int argc, char *argv[]) {
     struct OpStats result = impl(n_iterations, lower_real, upper_real, lower_imaginary,
                                  upper_imaginary, height, width, max_iterations);
 
-    printf("Operations: %llu, Time: %llu ns, ns/op: %Lf\n", result.n_op, result.n_ns,
-           (long double) result.n_ns / (long double) result.n_op);
+    printf("Operations: %llu, Time: %llu ns\n", result.n_op, result.n_ns);
 
     save_matrix(n_iterations, height, width, "result.bin");
 
