@@ -1,6 +1,10 @@
 #include "stdio.h"
+#include <assert.h>
+#include <immintrin.h>
+#include <stdalign.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 struct OpStats {
@@ -108,23 +112,139 @@ struct OpStats naive_mandelbrot(uint32_t *n_iterations,
     return res;
 }
 
-struct OpStats optimized_mandelbrot(uint32_t *n_iterations,
-                                    double lower_real,
-                                    double upper_real,
-                                    double lower_imaginary,
-                                    double upper_imaginary,
-                                    int height,
-                                    int width,
-                                    int max_iterations) {
+union u256d {
+  __m256d v;
+  double d[4];
+};
+
+#define PRINT_DV(a)                                                            \
+{                                                                              \
+    union u256d u = {a};                                                       \
+    printf("%f %f %f %f\n", u.d[0], u.d[1], u.d[2], u.d[3]);                   \
+}
+
+struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
+        double upper_real, double lower_imaginary,
+        double upper_imaginary, int height,
+        int width, int max_iterations) {
+    assert(width % 4 == 0); // lazy
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    // mandelbrot calculation
+    const double bound_squared = 4;
+    const double re_factor = (upper_real - lower_real) / (width - 1);
+    const double im_step =
+        height > 1 ? ((upper_imaginary - lower_imaginary) / (height - 1)) : 1;
+
+    const double re_inc4s = 4 * re_factor;
+    __m256d re_inc4 = _mm256_broadcast_sd(&re_inc4s);
+
+    __m256d c_im = _mm256_broadcast_sd(&upper_imaginary);
+    __m256d c_inc = _mm256_broadcast_sd(&im_step);
+
+    alignas(64) const double re_inc_step_arr[4] = {0, 1 * re_factor,
+        2 * re_factor, 3 * re_factor};
+    __m256d re_step = _mm256_load_pd(re_inc_step_arr);
+
+    for (int y = 0; y < height; ++y) {
+        __m256d c_re = _mm256_add_pd(_mm256_broadcast_sd(&lower_real), re_step);
+        for (int x = 0; x < width; x += 4) {
+            int n;
+            __m256i iters = _mm256_set1_epi64x(0);
+            __m256i iter_inc = _mm256_set1_epi64x(1);
+
+            __m256d z_re = c_re;
+            __m256d z_im = c_im;
+            for (n = 0; n < max_iterations; ++n) {
+
+                __m256d z_re2 = _mm256_mul_pd(z_re, z_re);
+                __m256d res_re = _mm256_add_pd(z_re2, c_re);
+                res_re = _mm256_fnmadd_pd(z_im, z_im, res_re);
+                __m256d res_im = _mm256_mul_pd(z_re, z_im);
+                res_im = _mm256_add_pd(res_im, res_im);
+                res_im = _mm256_add_pd(res_im, c_im);
+                z_re = res_re;
+                z_im = res_im;
+
+                __m256d mag = _mm256_fmadd_pd(z_im, z_im, z_re2);
+
+                __m256d lt_res = _mm256_cmp_pd(
+                        mag, _mm256_broadcast_sd(&bound_squared),
+                        _CMP_LT_OQ); // OQ means no signal if one of the operands is NaN
+
+                // mask that decides which positions in iters get incremented.
+                // once a position is > bound, we zero out the corresponding mask bits
+                // so it no longer gets incremented
+                iter_inc = _mm256_castpd_si256(
+                        _mm256_and_pd(_mm256_castsi256_pd(iter_inc), lt_res));
+
+                // only increment the 64 bit iter counters in positions where the
+                // comparison was true
+                iters = _mm256_add_epi64(iters, iter_inc);
+
+                // test if lt_res is all zeros (i.e, all magnitudes are greater than
+                // bound)
+                int all_gt = _mm256_testz_si256((__m256i)lt_res, (__m256i)lt_res);
+                if (all_gt) {
+                    break;
+                }
+            }
+            // get iter counts out of ymm register and store to n_iterations array
+            // n_iterations[y * width + x + 0] = _mm256_extract_epi32(iters, 0);
+            // n_iterations[y * width + x + 1] = _mm256_extract_epi32(iters, 2);
+            // n_iterations[y * width + x + 2] = _mm256_extract_epi32(iters, 4);
+            // n_iterations[y * width + x + 3] = _mm256_extract_epi32(iters, 6);
+
+            // extract lower 32 bits of every 64 bits in iters, since we want to store
+            // 32 bit int iteration counts. this is a bit annoying since vshufpd only
+            // works within 128 bit control lanes in 256bit registers, so we have to
+            // extract the 128 bit halves and shuffle within those to then do a single
+            // store
+            __m128 low = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 0);
+            __m128 high = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 1);
+            __m128 packed_32 = _mm_shuffle_ps(low, high, _MM_SHUFFLE(0, 2, 0, 2));
+            _mm_store_ps((float *)(&n_iterations[y * width + x]), packed_32);
+
+            c_re = _mm256_add_pd(c_re, re_inc4);
+        }
+        c_im = _mm256_sub_pd(c_im, c_inc);
+    }
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
-    struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
+    struct OpStats res = {0, end.tv_nsec - start.tv_nsec};
     return res;
+}
+
+// version: 0=naive, 1=optimized
+void benchmark(int version) {
+    const int repeat = 50;
+    // const int sizes[] = {100, 400, 800, 1000, 1400, 1600, 2000, 4000};
+    // const int max_iterss[] = {20, 100, 500, 800, 1000};
+    const int sizes[] = {2000, 4000};
+    const int max_iterss[] = {20, 100, 400};
+    printf("version,size,max_iters,time_s\n");
+    for (int si = 0; si < sizeof(sizes) / sizeof(int); ++si) {
+        const int size = sizes[si];
+        int32_t *n_iterations =
+            (int32_t *)aligned_alloc(64, size * size * sizeof(uint32_t));
+        for (int mi = 0; mi < sizeof(max_iterss) / sizeof(int); ++mi) {
+            const int max_iters = max_iterss[mi];
+            clock_t start = clock();
+            for (int r = 0; r < repeat; ++r) {
+                if (version == 0) {
+                    naive_mandelbrot((uint32_t *)n_iterations, -2, 1, -2, 2, size, size,
+                            max_iters);
+                } else if (version == 1) {
+                    optimized_mandelbrot(n_iterations, -2, 1, -2, 2, size, size,
+                            max_iters);
+                }
+            }
+            clock_t end = clock();
+            const double avg_sec = (double)(end - start) / CLOCKS_PER_SEC / repeat;
+            printf("%d,%d,%d,%f\n", version, size, max_iters, avg_sec);
+        }
+    }
 }
 
 // Arguments:
@@ -137,6 +257,15 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations,
 // [6]: (int) width
 // [7]: (int) maximum number of iterations
 int main(int argc, char *argv[]) {
+    if (argc == 3 && !strcmp(argv[1], "bench")) {
+        int version = atoi(argv[2]);
+        if (version != 0 && version != 1) {
+            return 1;
+        }
+        benchmark(version);
+        return 0;
+    }
+
     // Check if the correct number of arguments is provided
     if (argc != 8) {
         printf("Usage: %s <lower_rational> <upper_rational> <lower_irrational> <upper_irrational> <height> <width> <max_iterations>\n",
