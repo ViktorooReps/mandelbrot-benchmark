@@ -38,6 +38,16 @@ fprintf(stderr, "Error: _aligned_malloc failed\n");
 return ptr;
 }
 
+void free_aligned_memory(void *ptr) {
+#if defined(_WIN32) || defined(_WIN64)
+    _aligned_free(ptr);
+#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
+    free(n_iterations);
+#else
+            free(n_iterations);
+#endif
+}
+
 void save_matrix(uint32_t *matrix, int32_t n_rows, int32_t n_cols, const char *filename) {
     FILE *file = fopen(filename, "wb");
     if (file == NULL) {
@@ -242,35 +252,62 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations, double lower_real,
     return res;
 }
 
-// version: 0=naive, 1=optimized
-void benchmark(int version) {
-    const int repeat = 50;
-    // const int sizes[] = {100, 400, 800, 1000, 1400, 1600, 2000, 4000};
-    // const int max_iterss[] = {20, 100, 500, 800, 1000};
-    const int sizes[] = {2000, 4000};
-    const int max_iterss[] = {20, 100, 400};
-    printf("version,size,max_iters,time_s\n");
-    for (int si = 0; si < sizeof(sizes) / sizeof(int); ++si) {
-        const int size = sizes[si];
-        int32_t *n_iterations =
-                (int32_t *)allocate_aligned_memory(64, size * size * sizeof(uint32_t));
-        for (int mi = 0; mi < sizeof(max_iterss) / sizeof(int); ++mi) {
-            const int max_iters = max_iterss[mi];
-            clock_t start = clock();
-            for (int r = 0; r < repeat; ++r) {
-                if (version == 0) {
-                    naive_mandelbrot((uint32_t *)n_iterations, -2, 1, -2, 2, size, size,
-                                     max_iters);
-                } else if (version == 1) {
-                    optimized_mandelbrot(n_iterations, -2, 1, -2, 2, size, size,
-                                         max_iters);
+void benchmark(const char* filename) {
+    const int repeat = 10;
+    const int versions[] = {0, 1};
+    const int sizes[] = {64, 128, 256, 512, 1024, 2048, 4096};
+    const int max_iterss[] = {10, 50, 250};
+
+    FILE* output_file = fopen(filename, "w");
+    if (!output_file) {
+        fprintf(stderr, "Error: Unable to open output file %s\n", filename);
+        return;
+    }
+
+    // Write the header to the file
+    fprintf(output_file, "version,size,max_iters,time_s\n");
+
+    // Iterate through each combination of version, size, and max_iters
+    for (int v = 0; v < sizeof(versions) / sizeof(int); ++v) {
+        for (int si = 0; si < sizeof(sizes) / sizeof(int); ++si) {
+            const int size = sizes[si];
+
+            // Allocate memory with proper alignment
+            uint32_t *n_iterations = (uint32_t *) allocate_aligned_memory(64, size * size * sizeof(uint32_t));
+
+            // Check if memory allocation was successful
+            if (!n_iterations) {
+                fprintf(stderr, "Error: Memory allocation failed for size %d\n", size);
+                continue;
+            }
+
+            for (int mi = 0; mi < sizeof(max_iterss) / sizeof(int); ++mi) {
+                const int max_iters = max_iterss[mi];
+                for (int r = 0; r < repeat; ++r) {
+                    struct timespec start, end;
+                    clock_gettime(CLOCK_MONOTONIC, &start);
+
+                    // Perform the appropriate version of the Mandelbrot set computation
+                    if (v == 0) {
+                        naive_mandelbrot((uint32_t *) n_iterations, -2, 1, -2, 2, size, size, max_iters);
+                    } else if (v == 1) {
+                        optimized_mandelbrot(n_iterations, -2, 1, -2, 2, size, size, max_iters);
+                    }
+
+                    clock_gettime(CLOCK_MONOTONIC, &end);
+                    unsigned long long time_ns = get_ns_diff(start, end);
+
+                    // Write results to the file
+                    fprintf(output_file, "%d,%d,%d,%llu\n", v, size, max_iters, time_ns);
                 }
             }
-            clock_t end = clock();
-            const double avg_sec = (double)(end - start) / CLOCKS_PER_SEC / repeat;
-            printf("%d,%d,%d,%f\n", version, size, max_iters, avg_sec);
+
+            // Free the allocated memory
+            free_aligned_memory(n_iterations);
         }
     }
+
+    fclose(output_file);
 }
 
 // Arguments:
@@ -278,7 +315,7 @@ void benchmark(int version) {
 
 // 1) Benchmark with cache warmup
 // [1]: (char[]) mandatory "bench" string
-// [2]: (int) version, 0 for naive, 1 for optimized
+// [2]: (char[]) csv file where the results should be written to
 
 // 2) Single run
 // [1]: (int) version, 0 for naive, 1 for optimized
@@ -291,11 +328,7 @@ void benchmark(int version) {
 // [8]: (int) maximum number of iterations
 int main(int argc, char *argv[]) {
     if (argc == 3 && !strcmp(argv[1], "bench")) {
-        int version = atoi(argv[2]);
-        if (version != 0 && version != 1) {
-            return 1;
-        }
-        benchmark(version);
+        benchmark(argv[2]);
         return 0;
     }
 
@@ -392,6 +425,8 @@ int main(int argc, char *argv[]) {
            (long double) result.n_ns / (long double) result.n_op);
 
     save_matrix(n_iterations, height, width, "result.bin");
+
+    free_aligned_memory(n_iterations);
 
     return 0;
 }
