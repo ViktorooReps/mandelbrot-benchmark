@@ -158,10 +158,21 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
           break;
         }
       }
-      n_iterations[y * width + x + 0] = _mm256_extract_epi32(iters, 0);
-      n_iterations[y * width + x + 1] = _mm256_extract_epi32(iters, 2);
-      n_iterations[y * width + x + 2] = _mm256_extract_epi32(iters, 4);
-      n_iterations[y * width + x + 3] = _mm256_extract_epi32(iters, 6);
+      // get iter counts out of ymm register and store to n_iterations array
+      // n_iterations[y * width + x + 0] = _mm256_extract_epi32(iters, 0);
+      // n_iterations[y * width + x + 1] = _mm256_extract_epi32(iters, 2);
+      // n_iterations[y * width + x + 2] = _mm256_extract_epi32(iters, 4);
+      // n_iterations[y * width + x + 3] = _mm256_extract_epi32(iters, 6);
+
+      // extract lower 32 bits of every 64 bits in iters, since we want to store
+      // 32 bit int iteration counts. this is a bit annoying since vshufpd only
+      // works within 128 bit control lanes in 256bit registers, so we have to
+      // extract the 128 bit halves and shuffle within those to then do a single
+      // store
+      __m128 low = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 0);
+      __m128 high = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 1);
+      __m128 packed_32 = _mm_shuffle_ps(low, high, _MM_SHUFFLE(0, 2, 0, 2));
+      _mm_store_ps((float *)(&n_iterations[y * width + x]), packed_32);
 
       c_re = _mm256_add_pd(c_re, re_inc4);
     }
