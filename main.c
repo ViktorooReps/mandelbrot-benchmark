@@ -12,6 +12,32 @@ struct OpStats {
     uint64_t n_ns;
 };
 
+void* allocate_aligned_memory(size_t alignment, size_t size) {
+    void* ptr = NULL;
+
+#if defined(_WIN32) || defined(_WIN64)
+// Windows platform using _aligned_malloc
+ptr = _aligned_malloc(size, alignment);
+if (!ptr) {
+fprintf(stderr, "Error: _aligned_malloc failed\n");
+}
+#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
+// POSIX platforms using aligned_alloc
+    if (aligned_alloc(&ptr, alignment, size) != 0) {
+        ptr = NULL;
+        perror("Error: aligned_alloc failed");
+    }
+#else
+    // Fallback for unsupported platforms (custom or basic alignment handling)
+    ptr = malloc(size);
+    if (!ptr) {
+        fprintf(stderr, "Error: malloc failed\n");
+    }
+#endif
+
+return ptr;
+}
+
 void save_matrix(uint32_t *matrix, int32_t n_rows, int32_t n_cols, const char *filename) {
     FILE *file = fopen(filename, "wb");
     if (file == NULL) {
@@ -113,8 +139,8 @@ struct OpStats naive_mandelbrot(uint32_t *n_iterations,
 }
 
 union u256d {
-  __m256d v;
-  double d[4];
+    __m256d v;
+    double d[4];
 };
 
 #define PRINT_DV(a)                                                            \
@@ -123,10 +149,10 @@ union u256d {
     printf("%f %f %f %f\n", u.d[0], u.d[1], u.d[2], u.d[3]);                   \
 }
 
-struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
-        double upper_real, double lower_imaginary,
-        double upper_imaginary, int height,
-        int width, int max_iterations) {
+struct OpStats optimized_mandelbrot(uint32_t *n_iterations, double lower_real,
+                                    double upper_real, double lower_imaginary,
+                                    double upper_imaginary, int height,
+                                    int width, int max_iterations) {
     assert(width % 4 == 0); // lazy
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -134,7 +160,7 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
     const double bound_squared = 4;
     const double re_factor = (upper_real - lower_real) / (width - 1);
     const double im_step =
-        height > 1 ? ((upper_imaginary - lower_imaginary) / (height - 1)) : 1;
+            height > 1 ? ((upper_imaginary - lower_imaginary) / (height - 1)) : 1;
 
     const double re_inc4s = 4 * re_factor;
     __m256d re_inc4 = _mm256_broadcast_sd(&re_inc4s);
@@ -143,7 +169,7 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
     __m256d c_inc = _mm256_broadcast_sd(&im_step);
 
     alignas(64) const double re_inc_step_arr[4] = {0, 1 * re_factor,
-        2 * re_factor, 3 * re_factor};
+                                                   2 * re_factor, 3 * re_factor};
     __m256d re_step = _mm256_load_pd(re_inc_step_arr);
 
     for (int y = 0; y < height; ++y) {
@@ -184,7 +210,7 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
 
                 // test if lt_res is all zeros (i.e, all magnitudes are greater than
                 // bound)
-                int all_gt = _mm256_testz_si256((__m256i)lt_res, (__m256i)lt_res);
+                int all_gt = _mm256_testz_si256((__m256i) lt_res, (__m256i) lt_res);
                 if (all_gt) {
                     break;
                 }
@@ -203,14 +229,14 @@ struct OpStats optimized_mandelbrot(int32_t *n_iterations, double lower_real,
             __m128 low = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 0);
             __m128 high = _mm256_extractf128_ps(_mm256_castsi256_ps(iters), 1);
             __m128 packed_32 = _mm_shuffle_ps(low, high, _MM_SHUFFLE(0, 2, 0, 2));
-            _mm_store_ps((float *)(&n_iterations[y * width + x]), packed_32);
+            _mm_store_ps((float *) (&n_iterations[y * width + x]), packed_32);
 
             c_re = _mm256_add_pd(c_re, re_inc4);
         }
         c_im = _mm256_sub_pd(c_im, c_inc);
     }
 
-  clock_gettime(CLOCK_MONOTONIC, &end);
+    clock_gettime(CLOCK_MONOTONIC, &end);
 
     struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
     return res;
@@ -304,15 +330,14 @@ int main(int argc, char *argv[]) {
     printf("Width: %d\n", width);
     printf("Maximum number of iterations: %d\n", max_iterations);
 
-  // allocate the iteration matrix on the stack
-  // we will save this matrix to binary file, so we use uint32_t to ensure the
-  // size
-  int32_t *n_iterations =
-      (int32_t *) aligned_alloc(64, height * width * sizeof(uint32_t));
-  if (!n_iterations) {
-    fprintf(stderr, "Memory allocation failed\n");
-    return 1;
-  }
+    // allocate the iteration matrix on the heap
+    // we will save this matrix to binary file, so we use uint32_t to ensure the size
+    uint32_t *n_iterations =
+            (uint32_t *) allocate_aligned_memory(64, height * width * sizeof(uint32_t));
+    if (!n_iterations) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1;
+    }
 
     struct OpStats result = impl(n_iterations, lower_real, upper_real, lower_imaginary,
                                  upper_imaginary, height, width, max_iterations);
