@@ -42,9 +42,9 @@ void free_aligned_memory(void *ptr) {
 #if defined(_WIN32) || defined(_WIN64)
     _aligned_free(ptr);
 #elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
-    free(n_iterations);
+    free(ptr);
 #else
-            free(n_iterations);
+            free(ptr);
 #endif
 }
 
