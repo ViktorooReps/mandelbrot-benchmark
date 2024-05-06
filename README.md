@@ -29,3 +29,12 @@
    ```bash
    pip install -r requirements.txt
    ```
+
+## Build
+
+```
+mkdir build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make
+```
