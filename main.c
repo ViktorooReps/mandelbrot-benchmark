@@ -249,13 +249,14 @@ void benchmark(int version) {
 
 // Arguments:
 // [0]: (char[]) name of the program
-// [1]: (double) lower boundary for real part
-// [2]: (double) upper boundary for real part
-// [3]: (double) lower boundary for imaginary part
-// [4]: (double) upper boundary for imaginary part
-// [5]: (int) height
-// [6]: (int) width
-// [7]: (int) maximum number of iterations
+// [1]: (int) version, 0 for naive, 1 for optimized
+// [2]: (double) lower boundary for real part
+// [3]: (double) upper boundary for real part
+// [4]: (double) lower boundary for imaginary part
+// [5]: (double) upper boundary for imaginary part
+// [6]: (int) height
+// [7]: (int) width
+// [8]: (int) maximum number of iterations
 int main(int argc, char *argv[]) {
     if (argc == 3 && !strcmp(argv[1], "bench")) {
         int version = atoi(argv[2]);
@@ -267,8 +268,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Check if the correct number of arguments is provided
-    if (argc != 8) {
-        printf("Usage: %s <lower_rational> <upper_rational> <lower_irrational> <upper_irrational> <height> <width> <max_iterations>\n",
+    if (argc != 9) {
+        printf("Usage: %s <version> <lower_rational> <upper_rational> <lower_irrational> <upper_irrational> <height> <width> <max_iterations>\n",
                argv[0]);
         return 1;
     }
@@ -279,49 +280,58 @@ int main(int argc, char *argv[]) {
     // Convert command-line arguments to appropriate types
     char *endptr;
 
-    // Rational boundaries
-    lower_real = strtod(argv[1], &endptr);
-    if (*endptr != '\0') {
-        printf("Invalid lower rational boundary: %s\n", argv[1]);
+    unsigned int version = (unsigned int) strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || version > 1) {
+        printf("Invalid version: %s (parsed: %ud)\n", argv[1], version);
         return 1;
     }
 
-    upper_real = strtod(argv[2], &endptr);
+    struct OpStats (*impl)(unsigned int *, double, double, double, double, int, int, int);
+    impl = (version == 0) ? naive_mandelbrot : optimized_mandelbrot;
+
+    // Rational boundaries
+    lower_real = strtod(argv[2], &endptr);
     if (*endptr != '\0') {
-        printf("Invalid upper rational boundary: %s\n", argv[2]);
+        printf("Invalid lower rational boundary: %s\n", argv[2]);
+        return 1;
+    }
+
+    upper_real = strtod(argv[3], &endptr);
+    if (*endptr != '\0') {
+        printf("Invalid upper rational boundary: %s\n", argv[3]);
         return 1;
     }
 
     // Irrational boundaries
-    lower_imaginary = strtod(argv[3], &endptr);
+    lower_imaginary = strtod(argv[4], &endptr);
     if (*endptr != '\0') {
-        printf("Invalid lower irrational boundary: %s\n", argv[3]);
+        printf("Invalid lower irrational boundary: %s\n", argv[4]);
         return 1;
     }
 
-    upper_imaginary = strtod(argv[4], &endptr);
+    upper_imaginary = strtod(argv[5], &endptr);
     if (*endptr != '\0') {
         printf("Invalid upper irrational boundary: %s\n", argv[4]);
         return 1;
     }
 
     // Image dimensions
-    height = (int) strtol(argv[5], &endptr, 10);
+    height = (int) strtol(argv[6], &endptr, 10);
     if (*endptr != '\0') {
-        printf("Invalid height value: %s\n", argv[5]);
+        printf("Invalid height value: %s\n", argv[6]);
         return 1;
     }
 
-    width = (int) strtol(argv[6], &endptr, 10);
+    width = (int) strtol(argv[7], &endptr, 10);
     if (*endptr != '\0') {
-        printf("Invalid width value: %s\n", argv[6]);
+        printf("Invalid width value: %s\n", argv[7]);
         return 1;
     }
 
     // Maximum iterations
-    max_iterations = (int) strtol(argv[7], &endptr, 10);
+    max_iterations = (int) strtol(argv[8], &endptr, 10);
     if (*endptr != '\0') {
-        printf("Invalid maximum number of iterations: %s\n", argv[7]);
+        printf("Invalid maximum number of iterations: %s\n", argv[8]);
         return 1;
     }
 
@@ -342,10 +352,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    struct OpStats result = naive_mandelbrot(n_iterations, lower_real, upper_real, lower_imaginary,
-                                             upper_imaginary, height, width, max_iterations);
+    struct OpStats result = impl(n_iterations, lower_real, upper_real, lower_imaginary,
+                                 upper_imaginary, height, width, max_iterations);
 
-    printf("Operations: %llu, Time: %llu ns, ns/op: %Lf", result.n_op, result.n_ns,
+    printf("Operations: %llu, Time: %llu ns, ns/op: %Lf\n", result.n_op, result.n_ns,
            (long double) result.n_ns / (long double) result.n_op);
 
     save_matrix(n_iterations, height, width, "result.bin");

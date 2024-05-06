@@ -1,7 +1,7 @@
 
 # Mandelbrot Benchmark
 
-![Mandelbrot Fractal](mandelbrot.png)
+![Mandelbrot Fractal](docs/mandelbrot.png)
 
 ## Installation
 
