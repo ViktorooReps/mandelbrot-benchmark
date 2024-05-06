@@ -23,8 +23,8 @@ fprintf(stderr, "Error: _aligned_malloc failed\n");
 }
 #elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
 // POSIX platforms using aligned_alloc
-    if (aligned_alloc(&ptr, alignment, size) != 0) {
-        ptr = NULL;
+    ptr = aligned_alloc(alignment, size); 
+    if (!ptr) {
         perror("Error: aligned_alloc failed");
     }
 #else
