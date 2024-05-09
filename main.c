@@ -175,15 +175,15 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations, double lower_real,
     const double re_inc4s = 4 * re_factor;
     __m256d re_inc4 = _mm256_broadcast_sd(&re_inc4s);
 
-    __m256d c_im = _mm256_broadcast_sd(&upper_imaginary);
-    __m256d c_inc = _mm256_broadcast_sd(&im_step);
+    __m256d c_im = _mm256_set1_pd(upper_imaginary);
+    __m256d c_inc = _mm256_set1_pd(im_step);
 
     alignas(64) const double re_inc_step_arr[4] = {0, 1 * re_factor,
                                                    2 * re_factor, 3 * re_factor};
     __m256d re_step = _mm256_load_pd(re_inc_step_arr);
 
     for (int y = 0; y < height; ++y) {
-        __m256d c_re = _mm256_add_pd(_mm256_broadcast_sd(&lower_real), re_step);
+        __m256d c_re = _mm256_add_pd(_mm256_set1_pd(lower_real), re_step);
         for (int x = 0; x < width; x += 4) {
             int n;
             __m256i iters = _mm256_set1_epi64x(0);
@@ -205,7 +205,7 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations, double lower_real,
                 __m256d mag = _mm256_fmadd_pd(z_im, z_im, z_re2);
 
                 __m256d lt_res = _mm256_cmp_pd(
-                        mag, _mm256_broadcast_sd(&bound_squared),
+                        mag, _mm256_set1_pd(bound_squared),
                         _CMP_LT_OQ); // OQ means no signal if one of the operands is NaN
 
                 // mask that decides which positions in iters get incremented.
