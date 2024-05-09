@@ -15,9 +15,10 @@ REGEX = re.compile(r'Operations: (\d+), Time: (\d+) ns')
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the Mandelbrot benchmark and collect results.')
 
-    parser.add_argument('--start', type=int, default=500, help='Start value for the range')
-    parser.add_argument('--end', type=int, default=5500, help='End value for the range')
-    parser.add_argument('--step', type=int, default=500, help='Step size for the range')
+    # N must be a multiple of 8 for optimized2 version
+    parser.add_argument('--start', type=int, default=400, help='Start value for the range')
+    parser.add_argument('--end', type=int, default=6000, help='End value for the range')
+    parser.add_argument('--step', type=int, default=400, help='Step size for the range')
     parser.add_argument('--n_repeats', type=int, default=10, help='Number of repetitions per step')
     parser.add_argument('--exe_path', type=str, default='cmake-build-debug\\mandelbrot_benchmark.exe',
                         help='Path to the executable')
@@ -32,8 +33,8 @@ if __name__ == '__main__':
     results = pd.DataFrame(columns=['Impl', 'N', 'ns', 'ns/op'])
 
     all_ns = list(range(args.start, args.end, args.step)) * args.n_repeats
-    versions = ['naive', 'optimized']
-    version_ids = [0, 1]
+    versions = ['naive scalar', 'avx2', 'avx2_pipelining']
+    version_ids = [0, 1, 2]
     shuffle(all_ns)
 
     for version_id, n in tqdm(product(version_ids, all_ns), total=len(version_ids) * len(all_ns), smoothing=0):

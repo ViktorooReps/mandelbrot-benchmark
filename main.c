@@ -252,6 +252,128 @@ struct OpStats optimized_mandelbrot(uint32_t *n_iterations, double lower_real,
     return res;
 }
 
+
+// run 2 middle loop iterations "at once" to allow more instruction level parallelism
+struct OpStats optimized2_mandelbrot(uint32_t *n_iterations, double lower_real,
+                                    double upper_real, double lower_imaginary,
+                                    double upper_imaginary, int height,
+                                    int width, int max_iterations) {
+    assert(width % 8 == 0); // lazy
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    const double bound_squared = 4;
+    const double re_factor = (upper_real - lower_real) / (width - 1);
+    const double im_step =
+            height > 1 ? ((upper_imaginary - lower_imaginary) / (height - 1)) : 1;
+
+    const double re_inc4s = 4 * re_factor;
+    __m256d re_inc8 = _mm256_set1_pd(2 * re_inc4s);
+
+    __m256d c_im = _mm256_set1_pd(upper_imaginary);
+    __m256d c_inc = _mm256_set1_pd(im_step);
+
+    alignas(64) const double re_inc_step_arr[4] = {0, 1 * re_factor,
+                                                   2 * re_factor, 3 * re_factor};
+    __m256d re_step = _mm256_load_pd(re_inc_step_arr);
+
+    for (int y = 0; y < height; ++y) {
+        __m256d c_re1 = _mm256_add_pd(_mm256_set1_pd(lower_real), re_step);
+        __m256d c_re2 = _mm256_add_pd(_mm256_set1_pd(lower_real+re_inc4s), re_step);
+        for (int x = 0; x < width; x += 8) {
+            int n;
+            __m256i iters1 = _mm256_set1_epi64x(0);
+            __m256i iter_inc1 = _mm256_set1_epi64x(1);
+            __m256i iters2 = _mm256_set1_epi64x(0);
+            __m256i iter_inc2 = _mm256_set1_epi64x(1);
+
+            __m256d z1_re = c_re1;
+            __m256d z2_re = c_re2;
+            __m256d z1_im = c_im;
+            __m256d z2_im = c_im;
+            for (n = 0; n < max_iterations; ++n) {
+
+                __m256d z1_re2 = _mm256_mul_pd(z1_re, z1_re);
+                __m256d z2_re2 = _mm256_mul_pd(z2_re, z2_re);
+
+                __m256d res1_re = _mm256_add_pd(z1_re2, c_re1);
+                res1_re = _mm256_fnmadd_pd(z1_im, z1_im, res1_re);
+                __m256d res1_im = _mm256_mul_pd(z1_re, z1_im);
+                res1_im = _mm256_add_pd(res1_im, res1_im);
+                res1_im = _mm256_add_pd(res1_im, c_im);
+                z1_re = res1_re;
+                z1_im = res1_im;
+
+                __m256d res2_re = _mm256_add_pd(z2_re2, c_re2);
+                res2_re = _mm256_fnmadd_pd(z2_im, z2_im, res2_re);
+                __m256d res2_im = _mm256_mul_pd(z2_re, z2_im);
+                res2_im = _mm256_add_pd(res2_im, res2_im);
+                res2_im = _mm256_add_pd(res2_im, c_im);
+                z2_re = res2_re;
+                z2_im = res2_im;
+
+                __m256d mag1 = _mm256_fmadd_pd(z1_im, z1_im, z1_re2);
+
+                __m256d lt_res1 = _mm256_cmp_pd(
+                        mag1, _mm256_broadcast_sd(&bound_squared),
+                        _CMP_LT_OQ); // OQ means no signal if one of the operands is NaN
+
+                __m256d mag2 = _mm256_fmadd_pd(z2_im, z2_im, z2_re2);
+
+                __m256d lt_res2 = _mm256_cmp_pd(
+                        mag2, _mm256_broadcast_sd(&bound_squared),
+                        _CMP_LT_OQ); // OQ means no signal if one of the operands is NaN
+
+                // mask that decides which positions in iters get incremented.
+                // once a position is > bound, we zero out the corresponding mask bits
+                // so it no longer gets incremented
+                iter_inc1 = _mm256_castpd_si256(
+                        _mm256_and_pd(_mm256_castsi256_pd(iter_inc1), lt_res1));
+
+                iter_inc2 = _mm256_castpd_si256(
+                        _mm256_and_pd(_mm256_castsi256_pd(iter_inc2), lt_res2));
+
+                // only increment the 64 bit iter counters in positions where the
+                // comparison was true
+                iters1 = _mm256_add_epi64(iters1, iter_inc1);
+                iters2 = _mm256_add_epi64(iters2, iter_inc2);
+
+                // test if lt_res is all zeros (i.e, all magnitudes are greater than
+                // bound)
+                int all_gt = _mm256_testz_si256((__m256i) lt_res1, (__m256i) lt_res1) & _mm256_testz_si256((__m256i) lt_res2, (__m256i) lt_res2);
+                if (all_gt) {
+                    break;
+                }
+            }
+
+            // extract lower 32 bits of every 64 bits in iters, since we want to store
+            // 32 bit int iteration counts. this is a bit annoying since vshufpd only
+            // works within 128 bit control lanes in 256bit registers, so we have to
+            // extract the 128 bit halves and shuffle within those to then do a single
+            // store
+            
+            __m128 low1 = _mm256_extractf128_ps(_mm256_castsi256_ps(iters1), 0);
+            __m128 high1 = _mm256_extractf128_ps(_mm256_castsi256_ps(iters1), 1);
+            __m128 packed_32_1 = _mm_shuffle_ps(low1, high1, _MM_SHUFFLE(0, 2, 0, 2));
+            _mm_store_ps((float *) (&n_iterations[y * width + x]), packed_32_1);
+
+            __m128 low2 = _mm256_extractf128_ps(_mm256_castsi256_ps(iters2), 0);
+            __m128 high2 = _mm256_extractf128_ps(_mm256_castsi256_ps(iters2), 1);
+            __m128 packed_32_2 = _mm_shuffle_ps(low2, high2, _MM_SHUFFLE(0, 2, 0, 2));
+            _mm_store_ps((float *) (&n_iterations[y * width + x + 4]), packed_32_2);
+
+            c_re1 = _mm256_add_pd(c_re1, re_inc8);
+            c_re2 = _mm256_add_pd(c_re2, re_inc8);
+        }
+        c_im = _mm256_sub_pd(c_im, c_inc);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    struct OpStats res = {compute_ops(n_iterations, height, width), get_ns_diff(start, end)};
+    return res;
+}
+
 void benchmark(const char* filename) {
     const int repeat = 10;
     const int versions[] = {0, 1};
@@ -346,13 +468,13 @@ int main(int argc, char *argv[]) {
     char *endptr;
 
     unsigned int version = (unsigned int) strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0' || version > 1) {
+    if (*endptr != '\0' || version > 2) {
         printf("Invalid version: %s (parsed: %ud)\n", argv[1], version);
         return 1;
     }
 
     struct OpStats (*impl)(unsigned int *, double, double, double, double, int, int, int);
-    impl = (version == 0) ? naive_mandelbrot : optimized_mandelbrot;
+    impl = (version == 0) ? naive_mandelbrot : (version == 1 ? optimized_mandelbrot : optimized2_mandelbrot);
 
     // Rational boundaries
     lower_real = strtod(argv[2], &endptr);
